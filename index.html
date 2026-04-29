@@ -1,0 +1,375 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>GeoLift — Incrementality Experiment Designer</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.0/dist/chart.umd.js" integrity="sha384-iU8HYtnGQ8Cy4zl7gbNMOhsDTTKX02BTXptVP/vqAWIaTfM7isw76iyZCsjL2eVi" crossorigin="anonymous"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:#080b10;color:#cfd8e3;font-family:-apple-system,'Inter',system-ui,sans-serif;min-height:100vh;overflow-x:hidden}
+input,select,textarea{background:#141923;border:1px solid #1e2733;border-radius:5px;color:#cfd8e3;font-family:inherit;font-size:13px;padding:7px 10px;outline:none;width:100%;transition:border-color .15s}
+input:focus,select:focus,textarea:focus{border-color:#00c9a7}
+select option{background:#0e1219}
+::-webkit-scrollbar{width:4px;background:#080b10}
+::-webkit-scrollbar-thumb{background:#1e2733;border-radius:2px}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+.exp-card{transition:border-color .15s}
+.exp-card:hover{border-color:#2a3545!important}
+</style></head>
+<body><div id="app" style="min-height:100vh"></div>
+<script>
+const C={bg:'#080b10',surface:'#0e1219',surfaceHi:'#141923',border:'#1e2733',borderHi:'#2a3545',text:'#cfd8e3',muted:'#5a6a7e',cyan:'#00c9a7',amber:'#f5a623',red:'#f04a5a',green:'#3dd68c',blue:'#4e9eff',purple:'#a78bfa'};
+const F={h:"system-ui,sans-serif",m:"'Courier New',monospace",b:"-apple-system,system-ui,sans-serif"};
+
+const MOCK=[
+  {id:'exp-001',name:'Q4 Meta Paid Social — US DMA',status:'complete',type:'single',kpi:'Revenue',channel:'Meta',geoLevel:'DMA',testRange:'Nov 3–23, 2024',spend:325000,wizardStep:4,datasetId:'ds-aaa1',selectionId:'sel-bbb2',powerId:'pow-ccc3',resultId:'res-ddd4',result:{lift:7.4,iROAS:2.31,incRevenue:748200,pValue:0.031,r2:0.974},cells:[{label:'Treatment',color:'#00c9a7'}],bpScore:13},
+  {id:'exp-002',name:'Q4 Budget Calibration — Multi-Cell',status:'complete',type:'multi',kpi:'Revenue',channel:'Meta',geoLevel:'DMA',testRange:'Nov 3–23, 2024',spend:650000,wizardStep:4,datasetId:'ds-aaa2',selectionId:'sel-bbb3',powerId:'pow-ccc4',resultId:'res-ddd5',result:{lift:9.8,iROAS:2.87,incRevenue:1864000,pValue:0.018,r2:0.981},cells:[{label:'Cell A',color:'#00c9a7'},{label:'Cell B',color:'#f5a623'},{label:'Cell C',color:'#a78bfa'}],bpScore:14},
+  {id:'exp-003',name:'Q1 Brand Awareness — Social Upper Funnel',status:'active',type:'single',kpi:'Reach',channel:'Meta',geoLevel:'City',testRange:'Jan 6–Feb 2, 2025',spend:210000,wizardStep:4,datasetId:'ds-aaa3',selectionId:'sel-bbb4',powerId:'pow-ccc5',resultId:null,daysElapsed:17,testDays:28,cells:[{label:'Treatment',color:'#00c9a7'}],bpScore:12},
+  {id:'exp-004',name:'TikTok vs Meta Incrementality',status:'active',type:'multi',kpi:'Conversions',channel:'Multi-Channel',geoLevel:'DMA',testRange:'Jan 13–Feb 9, 2025',spend:480000,wizardStep:4,datasetId:'ds-aaa4',selectionId:'sel-bbb5',powerId:'pow-ccc6',resultId:null,daysElapsed:10,testDays:28,cells:[{label:'Meta Only',color:'#4e9eff'},{label:'TikTok Only',color:'#a78bfa'},{label:'Combined',color:'#f5a623'}],bpScore:13},
+  {id:'exp-005',name:'Q2 Spring Campaign — City Level',status:'draft',type:'single',kpi:'Orders',channel:'Meta',geoLevel:'City',testRange:'Mar 17–Apr 13, 2025',spend:175000,wizardStep:2,datasetId:'ds-aaa5',selectionId:null,powerId:null,resultId:null,cells:[{label:'Treatment',color:'#00c9a7'}],bpScore:8},
+  {id:'exp-006',name:'EU Expansion — Germany & France',status:'draft',type:'multi',kpi:'Revenue',channel:'Meta',geoLevel:'Region',testRange:'Mar 3–30, 2025',spend:290000,wizardStep:1,datasetId:null,selectionId:null,powerId:null,resultId:null,cells:[{label:'Germany',color:'#00c9a7'},{label:'France',color:'#f5a623'}],bpScore:5}
+];
+
+let S={view:'login',user:null,experiments:JSON.parse(JSON.stringify(MOCK)),activeExp:null,wizStep:0,filter:'all',search:'',toasts:[]};
+let chart=null;
+
+function e(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function fmt(v){return '$'+(v/1000).toFixed(0)+'K'}
+function sCol(s){return s==='complete'?C.green:s==='active'?C.cyan:C.muted}
+function sLbl(s){return s==='complete'?'Complete':s==='active'?'Active':'Draft'}
+
+function pill(s){const c=sCol(s),l=sLbl(s),dot=s==='active'?`<span style="width:4px;height:4px;border-radius:50%;background:${c};display:inline-block;animation:pulse 1.8s infinite;margin-right:4px"></span>`:'';return`<span style="background:${c}20;border:1px solid ${c}40;color:${c};border-radius:99px;font-size:9px;font-weight:700;padding:2px 8px;font-family:${F.m};display:inline-flex;align-items:center">${dot}${l}</span>`}
+function tag(col,txt){return`<span style="background:${col}20;border:1px solid ${col}50;color:${col};border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px;font-family:${F.m}">${e(txt)}</span>`}
+function bar(p,col,h=3){return`<div style="height:${h}px;background:${C.border};border-radius:${h}px;overflow:hidden"><div style="width:${Math.min(100,Math.max(0,p))}%;height:100%;background:${col};border-radius:${h}px;transition:width .3s"></div></div>`}
+function btn(txt,fn,{sec=false,col=C.cyan,dis=false,sz=13,px=20,py=9}={}){return`<button onclick="${e(fn)}" ${dis?'disabled':''} style="background:${sec?'transparent':col};color:${sec?C.muted:'#080b10'};border:1px solid ${sec?C.border:col};border-radius:7px;font-family:${F.b};font-size:${sz}px;font-weight:600;padding:${py}px ${px}px;cursor:${dis?'not-allowed':'pointer'};opacity:${dis?.4:1};transition:all .15s;white-space:nowrap">${txt}</button>`}
+function sbtn(txt,fn,col){return`<button onclick="${e(fn)}" style="background:${col}18;border:1px solid ${col}50;border-radius:5px;color:${col};font-family:${F.m};font-size:11px;font-weight:600;padding:5px 11px;cursor:pointer;white-space:nowrap">${txt}</button>`}
+function fld(lbl,inp){return`<div><label style="font-family:${F.m};font-size:10px;color:${C.muted};display:block;margin-bottom:5px;letter-spacing:.06em">${lbl}</label>${inp}</div>`}
+function sect(title,body){return`<div style="margin-bottom:24px"><div style="font-family:${F.m};font-size:9px;color:${C.muted};text-transform:uppercase;letter-spacing:.1em;margin-bottom:10px;padding-bottom:7px;border-bottom:1px solid ${C.border}">${title}</div>${body}</div>`}
+function shdr(n,t,s){return`<div style="margin-bottom:28px"><div style="font-family:${F.m};font-size:10px;color:${C.cyan};margin-bottom:5px;letter-spacing:.1em">STEP ${n}</div><h1 style="font-family:${F.h};font-size:24px;font-weight:800;color:#fff;margin:0 0 6px;letter-spacing:-.02em">${t}</h1><p style="font-family:${F.m};font-size:12px;color:${C.muted};margin:0">${s}</p></div>`}
+
+function genCF(lift){
+  const rng=(()=>{let s=42;return()=>{s=(s*16807)%2147483647;return(s-1)/2147483646}})();
+  const PRE=63,TEST=21;const d0=new Date('2024-09-01');
+  return Array.from({length:PRE+TEST},(_,i)=>{
+    const d=new Date(d0);d.setDate(d.getDate()+i);
+    const isTest=i>=PRE,base=82000*(1+Math.sin(i/7)*.08),n=(a=1)=>(rng()-.5)*2*a;
+    const syn=base+n(4200),act=isTest?syn*(1+lift/100)+n(3800):syn+n(1600);
+    return{date:d.toLocaleDateString('en-US',{month:'short',day:'numeric'}),actual:Math.round(act),synthetic:Math.round(syn),isTest};
+  });
+}
+
+function loginHTML(){return`
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:${C.bg};padding:24px">
+  <div style="width:100%;max-width:400px">
+    <div style="text-align:center;margin-bottom:40px">
+      <div style="font-family:${F.h};font-size:32px;font-weight:800;color:#fff;letter-spacing:-.03em;margin-bottom:8px"><span style="color:${C.cyan}">Geo</span>Lift</div>
+      <div style="font-family:${F.m};font-size:12px;color:${C.muted}">Incrementality Experiment Designer</div>
+    </div>
+    <div style="background:${C.surface};border:1px solid ${C.border};border-radius:12px;padding:32px">
+      <div style="font-family:${F.h};font-size:18px;font-weight:700;color:#fff;margin-bottom:4px">Sign in</div>
+      <div style="font-family:${F.m};font-size:11px;color:${C.muted};margin-bottom:24px">Demo credentials pre-filled</div>
+      <div style="margin-bottom:16px">${fld('EMAIL','<input id="lemail" value="analyst@acme.com">')}</div>
+      <div style="margin-bottom:24px">${fld('PASSWORD','<input id="lpw" type="password" value="geolift_demo">')}</div>
+      <button onclick="doLogin()" style="width:100%;background:${C.cyan};border:none;border-radius:8px;color:${C.bg};font-family:${F.b};font-weight:700;font-size:14px;padding:11px 0;cursor:pointer;margin-bottom:12px">Sign in →</button>
+      <button onclick="demoLogin()" style="width:100%;background:transparent;border:1px solid ${C.border};border-radius:8px;color:${C.muted};font-family:${F.m};font-size:12px;padding:9px 0;cursor:pointer">Skip — load demo data without backend</button>
+    </div>
+    <div style="text-align:center;margin-top:20px;font-family:${F.m};font-size:10px;color:${C.muted}">Demo: <span style="color:${C.text}">analyst@acme.com</span> / <span style="color:${C.text}">geolift_demo</span></div>
+  </div>
+</div>`}
+
+function topbarHTML(){
+  const exp=S.activeExp,v=S.view;
+  const vl={results:'Results',monitor:'Monitor',wizard:'Setup'}[v]||'';
+  const vc={results:C.green,monitor:C.cyan,wizard:C.amber}[v]||C.cyan;
+  return`<nav style="background:${C.surface};border-bottom:1px solid ${C.border};height:52px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;position:sticky;top:0;z-index:20">
+  <div style="display:flex;align-items:center;gap:12px">
+    <button onclick="goLib()" style="background:none;border:none;cursor:pointer;font-family:${F.h};font-size:17px;font-weight:800;color:#fff;letter-spacing:-.02em;padding:0"><span style="color:${C.cyan}">Geo</span>Lift</button>
+    ${v!=='library'&&exp?`<span style="color:${C.border}">›</span><span onclick="goLib()" style="font-family:${F.m};font-size:11px;color:${C.muted};cursor:pointer">Library</span><span style="color:${C.border}">›</span><span style="font-family:${F.m};font-size:11px;color:${C.text};max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e(exp.name||'New Experiment')}</span>${vl?`<span style="color:${C.border}">›</span><span style="font-family:${F.m};font-size:11px;color:${vc}">${vl}</span>`:''}`:'' }
+  </div>
+  <div style="display:flex;gap:10px;align-items:center">
+    <div style="display:flex;align-items:center;gap:5px;font-family:${F.m};font-size:10px;color:${C.muted}"><div style="width:6px;height:6px;border-radius:50%;background:${C.red}"></div>API offline</div>
+    ${v==='library'?`<button onclick="openNew()" style="background:${C.cyan};border:none;border-radius:7px;color:${C.bg};font-family:${F.b};font-weight:700;font-size:13px;padding:7px 16px;cursor:pointer">+ New Experiment</button>`:''}
+    ${v==='wizard'?`<button onclick="goLib()" style="background:transparent;border:1px solid ${C.border};border-radius:6px;color:${C.muted};font-family:${F.m};font-size:11px;padding:5px 12px;cursor:pointer">Save & Exit</button>`:''}
+    <div style="display:flex;align-items:center;gap:8px;padding-left:8px;border-left:1px solid ${C.border}">
+      <div style="width:26px;height:26px;border-radius:50%;background:${C.cyan}18;border:1px solid ${C.cyan}40;display:flex;align-items:center;justify-content:center;font-family:${F.m};font-size:11px;color:${C.cyan};font-weight:700">${e((S.user?.name||'U')[0].toUpperCase())}</div>
+      <span style="font-family:${F.m};font-size:10px;color:${C.muted}">${e(S.user?.org||'')}</span>
+      <button onclick="doLogout()" style="background:transparent;border:1px solid ${C.border};border-radius:5px;color:${C.muted};font-family:${F.m};font-size:10px;padding:3px 8px;cursor:pointer">Sign out</button>
+    </div>
+  </div>
+</nav>`}
+
+function libHTML(){
+  const exps=S.experiments,f=S.filter||'all',q=(S.search||'').toLowerCase();
+  const counts={all:exps.length,complete:exps.filter(e=>e.status==='complete').length,active:exps.filter(e=>e.status==='active').length,draft:exps.filter(e=>e.status==='draft').length};
+  const avgLift=exps.filter(e=>e.result).reduce((s,e)=>s+e.result.lift,0)/Math.max(1,exps.filter(e=>e.result).length);
+  const filtered=exps.filter(exp=>(f==='all'||exp.status===f)&&(!q||exp.name.toLowerCase().includes(q)));
+  return`<div style="flex:1;overflow-y:auto;padding:28px 28px 60px">
+  <div style="margin-bottom:24px">
+    <h1 style="font-family:${F.h};font-size:28px;font-weight:800;color:#fff;margin:0 0 4px;letter-spacing:-.02em">Experiment Library</h1>
+    <p style="font-family:${F.m};font-size:12px;color:${C.muted};margin:0">Design, monitor, and measure all your GeoLift incrementality experiments</p>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:24px">
+    ${[['Total',counts.all,C.text,false],['Complete',counts.complete,C.green,false],['Active',counts.active,C.cyan,true],['Draft',counts.draft,C.muted,false],['Avg Measured Lift',avgLift.toFixed(1)+'%',C.green,false]].map(([l,v,c,pulse])=>`
+    <div style="background:${C.surface};border:1px solid ${C.border};border-radius:10px;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:5px;margin-bottom:6px">${pulse?`<div style="width:6px;height:6px;border-radius:50%;background:${C.cyan};animation:pulse 1.8s infinite"></div>`:''}<span style="font-family:${F.m};font-size:9px;color:${C.muted};text-transform:uppercase;letter-spacing:.06em">${l}</span></div>
+      <div style="font-family:${F.h};font-size:22px;font-weight:800;color:${c};letter-spacing:-.02em">${v}</div>
+    </div>`).join('')}
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+    <div style="display:flex;gap:3px;background:${C.surface};border:1px solid ${C.border};border-radius:7px;padding:3px">
+      ${['all','active','complete','draft'].map(fl=>{const lbl=fl==='all'?`All (${counts.all})`:fl==='active'?`Active (${counts.active})`:fl==='complete'?`Complete (${counts.complete})`:`Draft (${counts.draft})`;const act=f===fl;return`<button onclick="setFilter('${fl}')" style="background:${act?C.cyan+'18':'transparent'};border:1px solid ${act?C.cyan+'50':'transparent'};border-radius:5px;color:${act?C.cyan:C.muted};font-family:${F.m};font-size:11px;padding:4px 10px;cursor:pointer">${lbl}</button>`}).join('')}
+    </div>
+    <input placeholder="Search…" oninput="setSearch(this.value)" value="${e(S.search||'')}" style="background:${C.surface};border:1px solid ${C.border};border-radius:6px;color:${C.text};font-size:12px;padding:6px 12px;outline:none;width:180px">
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
+    ${filtered.map(exp=>cardHTML(exp)).join('')}
+    ${newCardHTML()}
+  </div>
+</div>`}
+
+function cardHTML(exp){
+  const sc=sCol(exp.status),iC=exp.status==='complete',iA=exp.status==='active',iD=exp.status==='draft';
+  const pp=iA?Math.round(((exp.daysElapsed||0)/exp.testDays)*100):iD?Math.round(((exp.bpScore||0)/14)*100):100;
+  const bc=iD?(pp>=80?C.green:pp>=50?C.amber:C.red):sc;
+  return`<div class="exp-card" onclick="openExp('${e(exp.id)}')" style="background:${C.surface};border:1px solid ${C.border};border-radius:12px;padding:16px 18px;cursor:pointer;position:relative;overflow:hidden">
+  <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${sc};opacity:.5"></div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+    <div style="display:flex;gap:5px">${pill(exp.status)}${tag(exp.type==='multi'?C.amber:C.cyan,exp.type==='multi'?'Multi-Cell':'Single-Cell')}</div>
+    <span style="font-family:${F.m};font-size:9px;color:${C.muted}">${e(exp.channel)}</span>
+  </div>
+  <div style="font-family:${F.h};font-size:14px;font-weight:700;color:#fff;line-height:1.3;margin-bottom:8px">${e(exp.name)}</div>
+  <div style="display:flex;gap:10px;margin-bottom:10px;flex-wrap:wrap">${[exp.kpi,exp.geoLevel,exp.testRange].map(l=>`<span style="font-family:${F.m};font-size:9px;color:${C.muted}">${e(l)}</span>`).join('')}</div>
+  ${iC&&exp.result?`<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px">${[['+'+exp.result.lift+'%','Lift',C.green],[exp.result.iROAS+'×','iROAS',exp.result.iROAS>=2?C.green:C.amber],[fmt(exp.result.incRevenue),'Inc. Rev',C.cyan]].map(([v,l,c])=>`<div style="background:${C.surfaceHi};border-radius:6px;padding:8px 10px;text-align:center"><div style="font-family:${F.h};font-size:14px;font-weight:800;color:${c}">${v}</div><div style="font-family:${F.m};font-size:8px;color:${C.muted};margin-top:2px">${l}</div></div>`).join('')}</div>`:''}
+  ${iA?`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-family:${F.m};font-size:9px;color:${C.muted}">Flight</span><span style="font-family:${F.m};font-size:9px;color:${C.cyan}">Day ${exp.daysElapsed}/${exp.testDays}</span></div>${bar(pp,C.cyan)}</div>`:''}
+  ${iD?`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-family:${F.m};font-size:9px;color:${C.muted}">Setup (${exp.bpScore}/14 checks)</span><span style="font-family:${F.m};font-size:9px;color:${C.muted}">Step ${exp.wizardStep+1}/5</span></div>${bar(pp,bc)}</div>`:''}
+  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">${(exp.cells||[]).map(c=>`<div style="background:${c.color}15;border:1px solid ${c.color}40;border-radius:4px;padding:2px 7px;font-family:${F.m};font-size:9px;color:${c.color}">${e(c.label)}</div>`).join('')}</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding-top:10px;border-top:1px solid ${C.border}">
+    <span style="font-family:${F.m};font-size:10px;color:${C.muted}">$${((exp.spend||0)/1000).toFixed(0)}K spend</span>
+    <div style="display:flex;gap:5px" onclick="event.stopPropagation()">
+      ${iC?sbtn('View Results →',`openExp('${e(exp.id)}','results')`,C.green):''}
+      ${iA?sbtn('Monitor →',`openExp('${e(exp.id)}','monitor')`,C.cyan):''}
+      ${iD?sbtn('Continue Setup →',`openExp('${e(exp.id)}','wizard')`,C.amber):''}
+    </div>
+  </div>
+</div>`}
+
+function newCardHTML(){return`<div onclick="openNew()" onmouseenter="this.style.borderColor='${C.cyan}';this.style.background='${C.cyan}09'" onmouseleave="this.style.borderColor='${C.border}';this.style.background='transparent'" style="background:transparent;border:2px dashed ${C.border};border-radius:12px;padding:40px 20px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;transition:all .15s;min-height:200px"><div style="font-size:24px;color:${C.muted}">+</div><div style="font-family:${F.h};font-size:14px;font-weight:700;color:${C.muted}">New Experiment</div><div style="font-family:${F.m};font-size:11px;color:${C.muted}">Design a new GeoLift study</div></div>`}
+
+function resultsHTML(){
+  const exp=S.activeExp,r=exp?.result||{lift:7.4,iROAS:2.31,incRevenue:748200,pValue:0.031,r2:0.974};
+  return`<div style="flex:1;overflow-y:auto;padding:28px 28px 60px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap;gap:12px">
+    <div><div style="display:flex;gap:6px;margin-bottom:6px">${pill('complete')}${tag(exp?.type==='multi'?C.amber:C.cyan,exp?.type==='multi'?'Multi-Cell':'Single-Cell')}</div>
+    <h1 style="font-family:${F.h};font-size:22px;font-weight:800;color:#fff;margin:0;letter-spacing:-.02em">${e(exp?.name||'Experiment Results')}</h1></div>
+    <div style="display:flex;gap:8px">${sbtn('↓ Export Report','',C.cyan)}${sbtn('← Back to Library',"goLib()",C.muted)}</div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px">
+    ${[[fmt(r.incRevenue),'Incremental Revenue',null,C.green,true],['+'+r.lift+'%','Lift %','90% CI [5.3%, 9.5%]',C.cyan,true],[r.iROAS+'×','iROAS',null,r.iROAS>=2?C.green:C.amber,false],[r.pValue,'p-value',r.pValue<=.05?'Significant ✓':'Not significant',r.pValue<=.05?C.green:C.red,false],[r.r2,'Pre-period R²','MAPE 2.31%',r.r2>=.95?C.green:C.amber,false]].map(([v,l,sub,c,lg])=>`
+    <div style="background:${C.surface};border:1px solid ${C.border};border-radius:10px;padding:14px 16px">
+      <div style="font-family:${F.m};font-size:9px;color:${C.muted};margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em">${l}</div>
+      <div style="font-family:${F.h};font-size:${lg?24:20}px;font-weight:800;color:${c};letter-spacing:-.02em">${v}</div>
+      ${sub?`<div style="font-family:${F.m};font-size:9px;color:${C.muted};margin-top:4px">${sub}</div>`:''}
+    </div>`).join('')}
+  </div>
+  <div style="background:${C.surface};border:1px solid ${C.border};border-radius:12px;padding:18px 20px 12px;margin-bottom:16px">
+    <div style="font-family:${F.h};font-size:14px;font-weight:700;color:#fff;margin-bottom:4px">Actual vs Synthetic Control</div>
+    <div style="font-family:${F.m};font-size:10px;color:${C.muted};margin-bottom:16px">Daily ${e(exp?.kpi||'Revenue')} · treatment vs counterfactual</div>
+    <div style="position:relative;height:260px"><canvas id="rchart"></canvas></div>
+    <div style="display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid ${C.border}">
+      <div style="display:flex;align-items:center;gap:5px"><div style="width:14px;height:2px;background:${C.cyan}"></div><span style="font-family:${F.m};font-size:9px;color:${C.muted}">Actual</span></div>
+      <div style="display:flex;align-items:center;gap:5px"><svg width="18" height="8"><line x1="0" y1="4" x2="18" y2="4" stroke="${C.muted}" stroke-width="1.5" stroke-dasharray="4 3"/></svg><span style="font-family:${F.m};font-size:9px;color:${C.muted}">Synthetic control</span></div>
+      <div style="display:flex;align-items:center;gap:5px"><div style="width:10px;height:7px;background:${C.green};border-radius:2px;opacity:.5"></div><span style="font-family:${F.m};font-size:9px;color:${C.muted}">Incremental lift</span></div>
+    </div>
+  </div>
+  <div style="background:${C.green}12;border:1px solid ${C.green}40;border-left:3px solid ${C.green};border-radius:8px;padding:12px 16px">
+    <div style="font-family:${F.m};font-size:11px;color:${C.green};font-weight:600">✓ Statistically valid result</div>
+    <div style="font-size:11px;color:${C.muted};margin-top:3px;line-height:1.6">p = ${r.pValue} · R² = ${r.r2} · All pre-period validity checks passed. iROAS of ${r.iROAS}× exceeds the 3.3× break-even threshold.</div>
+  </div>
+</div>`}
+
+function buildChart(){
+  const cv=document.getElementById('rchart');if(!cv||!window.Chart)return;
+  if(chart){chart.destroy();chart=null;}
+  const exp=S.activeExp,r=exp?.result||{lift:7.4};
+  const series=genCF(r.lift);const PRE=63;
+  chart=new Chart(cv,{type:'line',data:{
+    labels:series.map(d=>d.date),
+    datasets:[
+      {label:'Actual',data:series.map(d=>d.actual),borderColor:C.cyan,borderWidth:2,pointRadius:0,fill:false,tension:.3},
+      {label:'Synthetic Control',data:series.map(d=>d.synthetic),borderColor:C.muted,borderWidth:1.5,borderDash:[5,3],pointRadius:0,fill:false,tension:.3},
+      {label:'Lift Area',data:series.map((d,i)=>i>=PRE?d.actual:null),borderColor:'transparent',backgroundColor:C.green+'28',fill:{target:1,above:C.green+'28'},pointRadius:0,tension:.3}
+    ]
+  },options:{
+    responsive:true,maintainAspectRatio:false,
+    interaction:{intersect:false,mode:'index'},
+    plugins:{legend:{display:false},tooltip:{backgroundColor:C.surfaceHi,borderColor:C.borderHi,borderWidth:1,titleFont:{family:'monospace',size:10},bodyFont:{family:'monospace',size:10},callbacks:{label:ctx=>` ${ctx.dataset.label}: $${(ctx.raw/1000).toFixed(0)}K`}}},
+    scales:{
+      x:{ticks:{color:C.muted,font:{family:'monospace',size:9},maxTicksLimit:10},grid:{color:C.border+'60'},border:{display:false}},
+      y:{ticks:{color:C.muted,font:{family:'monospace',size:9},callback:v=>'$'+(v/1000).toFixed(0)+'K'},grid:{color:C.border+'60'},border:{display:false}}
+    }
+  }});
+}
+
+function monitorHTML(){
+  const exp=S.activeExp;if(!exp)return'';
+  const pv=Math.round(((exp.daysElapsed||0)/(exp.testDays||28))*100),dl=(exp.testDays||28)-(exp.daysElapsed||0);
+  return`<div style="flex:1;overflow-y:auto;padding:28px 28px 60px">
+  <div style="background:#0d1020;border:1px solid ${C.amber}60;border-left:4px solid ${C.amber};border-radius:8px;padding:14px 18px;margin-bottom:20px;display:flex;align-items:center;gap:16px">
+    <span style="font-size:20px;flex-shrink:0">⏳</span>
+    <div style="flex:1"><div style="font-family:${F.h};font-size:14px;font-weight:700;color:${C.amber}">Do not make decisions based on in-flight data</div>
+    <div style="font-size:12px;color:${C.muted};margin-top:2px">Results will be statistically valid in <strong style="color:${C.text}">${dl} day${dl!==1?'s':''}</strong>. Early signal is directional only.</div></div>
+    <div style="text-align:center;flex-shrink:0"><div style="font-family:${F.h};font-size:28px;font-weight:800;color:${C.amber}">${dl}d</div><div style="font-family:${F.m};font-size:9px;color:${C.muted}">remaining</div></div>
+  </div>
+  <div style="background:${C.surface};border:1px solid ${C.border};border-radius:10px;padding:18px 20px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px">
+      <div style="font-family:${F.h};font-size:15px;font-weight:700;color:#fff">${e(exp.name)}</div>
+      <span style="font-family:${F.m};font-size:11px;color:${C.cyan}">Day ${exp.daysElapsed||0} / ${exp.testDays||28}</span>
+    </div>
+    ${bar(pv,C.cyan,6)}
+    <div style="display:flex;justify-content:space-between;margin-top:6px">
+      <span style="font-family:${F.m};font-size:10px;color:${C.muted}">Start: ${e((exp.testRange||'').split('–')[0]||'—')}</span>
+      <span style="font-family:${F.m};font-size:10px;color:${C.muted}">End: ${e((exp.testRange||'').split('–')[1]||'—')}</span>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+    ${[[exp.kpi,'KPI'],[exp.channel,'Channel'],['$'+((((exp.spend||0)*pv/100))/1000).toFixed(0)+'K of $'+((exp.spend||0)/1000).toFixed(0)+'K','Spend to Date']].map(([v,l])=>`
+    <div style="background:${C.surface};border:1px solid ${C.border};border-radius:8px;padding:12px 14px">
+      <div style="font-family:${F.m};font-size:9px;color:${C.muted};margin-bottom:4px;text-transform:uppercase;letter-spacing:.06em">${l}</div>
+      <div style="font-family:${F.h};font-size:16px;font-weight:700;color:${C.text}">${e(v)}</div>
+    </div>`).join('')}
+  </div>
+  <div style="display:flex;gap:8px">${btn('← Back to Library',"goLib()",{sec:true})}</div>
+</div>`}
+
+const IS=`style="background:${C.surfaceHi};border:1px solid ${C.border};border-radius:5px;color:${C.text};font-family:inherit;font-size:13px;padding:7px 10px;outline:none;width:100%"`;
+
+function wizHTML(){
+  const exp=S.activeExp,step=S.wizStep||0;if(!exp)return'';
+  const steps=['Setup','Data','Markets','Power','Review'],pv=Math.round((step/(steps.length-1))*100);
+  const sc=[wizS0,wizS1,wizS2,wizS3,wizS4][step](exp);
+  return`<div style="flex:1;display:flex;overflow:hidden">
+  <aside style="width:220px;background:${C.surface};border-right:1px solid ${C.border};display:flex;flex-direction:column;flex-shrink:0">
+    <div style="padding:20px 16px 14px;border-bottom:1px solid ${C.border}">
+      ${exp.name?`<div style="font-family:${F.h};font-size:12px;font-weight:700;color:#fff;word-break:break-word">${e(exp.name)}</div>`:`<div style="font-family:${F.m};font-size:11px;color:${C.muted}">New Experiment</div>`}
+      <div style="margin-top:6px">${tag(exp.type==='multi'?C.amber:C.cyan,exp.type==='multi'?'Multi-Cell':'Single-Cell')}</div>
+    </div>
+    <nav style="padding:12px 0;flex:1">
+      ${steps.map((s,i)=>{
+        const locked=(i===2&&!exp.datasetId)||(i===3&&!exp.selectionId)||(i===4&&!exp.powerId);
+        const active=step===i,done=step>i;
+        const bc=locked?C.border:done?C.green:active?C.cyan:C.border;
+        const tc=locked?C.muted:active?C.cyan:done?C.text:C.muted;
+        return`<button onclick="${locked?'':('setWizStep('+i+')')}" ${locked?'disabled':''} style="display:flex;align-items:center;gap:10px;width:100%;padding:9px 16px;background:${active?C.cyan+'18':'transparent'};border:none;border-left:2px solid ${active?C.cyan:'transparent'};cursor:${locked?'not-allowed':'pointer'};text-align:left">
+          <div style="width:20px;height:20px;border-radius:4px;background:${bc};display:flex;align-items:center;justify-content:center;font-size:10px;color:${locked||(!done&&!active)?C.muted:C.bg};font-weight:700;flex-shrink:0">${locked?'🔒':done?'✓':i+1}</div>
+          <span style="font-size:12px;font-weight:${active?600:400};color:${tc}">${s}</span>
+        </button>`;
+      }).join('')}
+    </nav>
+    <div style="padding:12px 16px;border-top:1px solid ${C.border}">
+      <div style="display:flex;justify-content:space-between;margin-bottom:5px"><span style="font-family:${F.m};font-size:9px;color:${C.muted}">Progress</span><span style="font-family:${F.m};font-size:9px;color:${C.cyan}">${pv}%</span></div>
+      ${bar(pv,C.cyan)}
+    </div>
+  </aside>
+  <main style="flex:1;overflow-y:auto;padding:32px 36px">
+    ${sc}
+    <div style="display:flex;justify-content:space-between;margin-top:36px;padding-top:20px;border-top:1px solid ${C.border}">
+      ${btn('← Back',step>0?`setWizStep(${step-1})`:'',{sec:true,dis:step===0})}
+      ${step<4?btn('Continue →',`setWizStep(${step+1})`):btn('Launch Experiment ✓','launchExp()',{col:C.green})}
+    </div>
+  </main>
+</div>`}
+
+function wizS0(exp){return`${shdr('01','Experiment Setup','Core configuration — name, KPI, test structure, and dates.')}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px">
+  ${fld('EXPERIMENT NAME',`<input ${IS} value="${e(exp.name)}" oninput="updExp('name',this.value)" placeholder="e.g. Q3 Meta Paid Social">`)}
+  ${fld('PRIMARY KPI',`<select ${IS} onchange="updExp('kpi',this.value)">${['Revenue','Conversions','App Installs','Leads','Orders'].map(k=>`<option ${exp.kpi===k?'selected':''}>${k}</option>`).join('')}</select>`)}
+</div>
+${sect('Test Structure',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  ${[{t:'single',title:'Single-Cell',badge:'Standard',col:C.cyan,desc:'One treatment group vs one control pool.',pts:['Simpler execution','Lower budget','Ideal for first studies']},{t:'multi',title:'Multi-Cell',badge:'Advanced',col:C.amber,desc:'Multiple treatment arms, shared control.',pts:['Compare 2+ variations','Efficient vs sequential','Requires more geo units']}].map(o=>`
+  <div onclick="updExpRender('type','${o.t}')" style="border:2px solid ${exp.type===o.t?o.col:C.border};border-radius:10px;padding:16px;cursor:pointer;background:${exp.type===o.t?o.col+'15':'transparent'};transition:all .15s">
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px"><span style="font-family:${F.h};font-size:14px;font-weight:700;color:#fff">${o.title}</span>${tag(o.col,o.badge)}</div>
+    <p style="font-size:12px;color:${C.muted};margin-bottom:10px;line-height:1.5">${o.desc}</p>
+    ${o.pts.map(p=>`<div style="font-size:11px;color:${exp.type===o.t?C.text:C.muted};margin-bottom:3px;display:flex;gap:5px"><span style="color:${o.col}">›</span>${p}</div>`).join('')}
+  </div>`).join('')}
+</div>`)}
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:24px">
+  ${fld('GEO LEVEL',`<select ${IS} onchange="updExp('geoLevel',this.value)">${['Zip Code','City','DMA','Region','Country'].map(g=>`<option ${exp.geoLevel===g?'selected':''}>${g}</option>`).join('')}</select>`)}
+  ${fld('DATA GRANULARITY',`<select ${IS} onchange="updExp('granularity',this.value)"><option ${exp.granularity!=='weekly'?'selected':''} value="daily">Daily ✓ Recommended</option><option ${exp.granularity==='weekly'?'selected':''} value="weekly">Weekly</option></select>`)}
+  ${fld('PRE-PERIOD START',`<input type="date" ${IS} value="${e(exp.preStart||'')}" onchange="updExp('preStart',this.value)">`)}
+  ${fld('TEST START',`<input type="date" ${IS} value="${e(exp.startDate||'')}" onchange="updExp('startDate',this.value)">`)}
+  ${fld('PRE-PERIOD END',`<input type="date" ${IS} value="${e(exp.preEnd||'')}" onchange="updExp('preEnd',this.value)">`)}
+  ${fld('TEST END',`<input type="date" ${IS} value="${e(exp.endDate||'')}" onchange="updExp('endDate',this.value)">`)}
+</div>`}
+
+function wizS1(exp){const has=!!exp.datasetId;return`${shdr('02','Data Requirements','Upload your KPI panel and validate against best practices.')}
+${sect('Data Quality Declaration',['No missing values for any geo × date combination','Pre-period free of structural breaks','20+ geo units available','Panel covariates available (optional)'].map((lbl,i)=>{const keys=['missingValues','structuralBreaks','hasMinGeos','covariates'],inv=[true,true,false,false],chk=inv[i]?!exp[keys[i]]:!!exp[keys[i]];return`<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:10px"><div onclick="toggleCheck('${keys[i]}',${inv[i]})" style="width:17px;height:17px;border-radius:4px;border:2px solid ${chk?C.cyan:C.border};background:${chk?C.cyan:'transparent'};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;color:${C.bg};font-weight:900;flex-shrink:0;margin-top:1px;transition:all .15s">${chk?'✓':''}</div><span style="font-size:12px;color:${chk?C.text:C.muted}">${lbl}</span></div>`}).join(''))}
+${sect('Dataset Upload',has?`<div style="background:${C.green}12;border:1px solid ${C.green}40;border-radius:8px;padding:14px 16px;display:flex;gap:12px;align-items:center"><span style="font-size:20px">✓</span><div><div style="font-family:${F.m};font-size:12px;color:${C.green};font-weight:600">Dataset ready</div><div style="font-family:${F.m};font-size:10px;color:${C.muted}">${e(exp.datasetId)} · Validation passed</div></div><div style="margin-left:auto">${sbtn('Markets →',"setWizStep(2)",C.green)}</div></div>`:`<div style="border:2px dashed ${C.border};border-radius:8px;padding:32px;text-align:center"><div style="font-size:24px;margin-bottom:8px">⬆</div><div style="font-family:${F.m};font-size:12px;color:${C.muted};margin-bottom:4px">Drop CSV or connect a data source</div><div style="font-family:${F.m};font-size:11px;color:${C.muted};margin-bottom:16px">Required: <code style="color:${C.cyan}">date</code> · <code style="color:${C.cyan}">location</code> · <code style="color:${C.cyan}">Y</code></div>${btn('Simulate Dataset Upload','simUpload()')}<div style="display:flex;gap:6px;justify-content:center;margin-top:12px;flex-wrap:wrap">${['BigQuery','Snowflake','Meta Ads API','GA4'].map(s=>`<button style="background:${C.surfaceHi};border:1px solid ${C.border};border-radius:4px;color:${C.muted};font-size:11px;padding:4px 10px;cursor:pointer">${s}</button>`).join('')}</div></div>`)}`}
+
+function wizS2(exp){const done=!!exp.selectionId;return`${shdr('03','Market Selection','Assign treatment markets and run GeoLiftMarketSelection() to optimize the control pool.')}
+<div style="background:${C.blue}12;border:1px solid ${C.blue}30;border-left:3px solid ${C.blue};border-radius:6px;padding:10px 14px;font-size:12px;color:${C.text};line-height:1.6;margin-bottom:20px"><strong>Full interactive map:</strong> The D3 US choropleth with DMA circles lives in GeoLiftMarketMap.jsx and mounts here in the full Docker app.</div>
+${sect('Treatment Markets',`<div style="margin-bottom:8px">${fld('SELECTED MARKETS',`<input ${IS} value="${e((exp.treatmentMarkets||['New York','Chicago','Atlanta']).join(', '))}" placeholder="New York, Chicago, Atlanta">`)}</div><div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${(exp.treatmentMarkets||['New York','Chicago','Atlanta']).map(m=>`<div style="background:${C.cyan}15;border:1px solid ${C.cyan}40;border-radius:4px;padding:3px 8px;font-family:${F.m};font-size:11px;color:${C.cyan}">${e(m)}</div>`).join('')}</div>`)}
+${!done?btn('▶ Run GeoLiftMarketSelection()','simMarkets()'):`<div style="background:${C.amber}12;border:1px solid ${C.amber}40;border-radius:8px;padding:14px 16px;display:flex;gap:12px;align-items:center"><span style="font-size:20px">✓</span><div><div style="font-family:${F.m};font-size:12px;color:${C.amber};font-weight:600">Markets selected</div><div style="font-family:${F.m};font-size:10px;color:${C.muted}">${e(exp.selectionId)} · R²=0.974 · RMSE=0.042</div></div><div style="margin-left:auto">${sbtn('Power →',"setWizStep(3)",C.amber)}</div></div>`}`}
+
+function wizS3(exp){const done=!!exp.powerId,mde=parseFloat(exp.targetEffect||5),conf=parseInt(exp.confidence||80),durations=[7,10,14,21,28,35,42],pw=d=>Math.min(100,20+(d/42)*85*(1-(mde-5)*.02)*(conf/90));return`${shdr('04','Power Analysis','Run GeoLiftPower() to find the minimum detectable effect at your target confidence.')}
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:24px">
+  ${fld('TARGET MDE (%)',`<input type="number" ${IS} value="${mde}" onchange="updExpRender('targetEffect',this.value)">`)}
+  ${fld('CONFIDENCE LEVEL',`<select ${IS} onchange="updExpRender('confidence',this.value)">${[['70','70% — Exploratory'],['80','80% — Standard ✓'],['90','90% — Conservative'],['95','95% — High']].map(([v,l])=>`<option value="${v}" ${String(conf)===v?'selected':''}>${l}</option>`).join('')}</select>`)}
+  ${fld('PLANNED SPEND ($)',`<input type="number" ${IS} value="${e(exp.spend||'')}" onchange="updExp('spend',this.value)" placeholder="0">`)}
+</div>
+${sect('Power Curve (GeoLiftPower)',`<div style="background:${C.surface};border:1px solid ${C.border};border-radius:8px;padding:16px 16px 8px"><div style="font-family:${F.m};font-size:10px;color:${C.muted};margin-bottom:12px">Simulated power at MDE ${mde}% across test durations</div><div style="display:flex;align-items:flex-end;gap:5px;height:80px">${durations.map(d=>{const p=Math.max(5,Math.min(100,pw(d))),c=p>=conf?C.green:p>=conf*.85?C.amber:C.red;return`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px"><div style="font-family:${F.m};font-size:8px;color:${c}">${Math.round(p)}%</div><div style="width:100%;height:${p*.72}px;background:${c};border-radius:2px 2px 0 0;opacity:.75"></div><div style="font-family:${F.m};font-size:8px;color:${C.muted}">${d}d</div></div>`}).join('')}</div></div>`)}
+${!done?btn('▶ Run GeoLiftPower()','simPower()'):`<div style="background:${C.purple}12;border:1px solid ${C.purple}40;border-radius:8px;padding:14px 16px;display:flex;gap:12px;align-items:center"><span>✓</span><div><div style="font-family:${F.m};font-size:12px;color:${C.purple};font-weight:600">Power analysis complete</div><div style="font-family:${F.m};font-size:10px;color:${C.muted}">${e(exp.powerId)} · MDE 5.2% at 21d · Power 84%</div></div><div style="margin-left:auto">${sbtn('Review →',"setWizStep(4)",C.purple)}</div></div>`}`}
+
+function wizS4(exp){const ok=exp.datasetId&&exp.selectionId&&exp.powerId,pre=exp.preStart&&exp.preEnd?Math.round((new Date(exp.preEnd)-new Date(exp.preStart))/86400000)+1:null,tst=exp.startDate&&exp.endDate?Math.round((new Date(exp.endDate)-new Date(exp.startDate))/86400000)+1:null;return`${shdr('05','Review & Launch','Final summary. All required checks must pass before launching.')}
+<div style="border:2px solid ${ok?C.green:C.amber};border-radius:10px;padding:16px;margin-bottom:20px;background:${ok?C.green+'12':C.amber+'12'};display:flex;gap:12px;align-items:center">
+  <span style="font-size:28px">${ok?'✓':'⚠'}</span>
+  <div><div style="font-family:${F.h};font-size:14px;font-weight:700;color:#fff">${ok?'Ready to launch':'Complete all steps before launching'}</div>
+  <div style="font-family:${F.m};font-size:10px;color:${C.muted};margin-top:2px">${ok?'Dataset · Markets · Power analysis all confirmed':'Missing: '+[!exp.datasetId&&'Dataset',!exp.selectionId&&'Market Selection',!exp.powerId&&'Power Analysis'].filter(Boolean).join(', ')}</div></div>
+</div>
+${sect('Configuration',`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">${[['Name',exp.name||'—'],['KPI',exp.kpi],['Test Type',exp.type==='multi'?`Multi-Cell (${(exp.cells||[]).length} cells)`:'Single-Cell'],['Geo Level',exp.geoLevel||'—'],['Granularity',exp.granularity||'—'],['Pre-period',pre?pre+'d':'—'],['Test Duration',tst?tst+'d':'—'],['Pre:Test Ratio',pre&&tst?(pre/tst).toFixed(1)+'×':'—'],['Target MDE',(exp.targetEffect||5)+'%'],['Confidence',(exp.confidence||80)+'%'],['Spend',exp.spend?'$'+Number(exp.spend).toLocaleString():'—']].map(([k,v])=>`<div style="display:flex;justify-content:space-between;padding:7px 10px;background:${C.surface};border-radius:4px;border:1px solid ${C.border}"><span style="font-family:${F.m};font-size:11px;color:${C.muted}">${k}</span><span style="font-family:${F.m};font-size:11px;color:${C.text}">${e(String(v))}</span></div>`).join('')}</div>`)}`}
+
+function toastsHTML(){return`<div id="toasts" style="position:fixed;bottom:20px;right:20px;display:flex;flex-direction:column;gap:8px;z-index:100">${toastsInner()}</div>`}
+function toastsInner(){return S.toasts.map(t=>`<div style="background:${C.surfaceHi};border:1px solid ${t.color}50;border-left:3px solid ${t.color};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px;min-width:280px;max-width:380px;animation:slideIn .2s ease"><div style="width:6px;height:6px;border-radius:50%;background:${t.color};flex-shrink:0"></div><span style="font-family:${F.m};font-size:11px;color:${C.text};flex:1">${e(t.msg)}</span><button onclick="dismissToast(${t.id})" style="background:none;border:none;color:${C.muted};cursor:pointer;font-size:14px">×</button></div>`).join('')}
+
+function render(){
+  const app=document.getElementById('app');
+  if(!S.user){app.innerHTML=loginHTML();return;}
+  app.innerHTML=`<div style="min-height:100vh;background:${C.bg};display:flex;flex-direction:column">${topbarHTML()}<div style="flex:1;display:flex;overflow:hidden;min-height:calc(100vh - 52px)">${S.view==='library'?libHTML():S.view==='wizard'?wizHTML():S.view==='results'?resultsHTML():S.view==='monitor'?monitorHTML():''}</div>${toastsHTML()}</div>`;
+  if(S.view==='results')requestAnimationFrame(buildChart);
+}
+
+function doLogin(){const em=(document.getElementById('lemail')||{}).value||'analyst@acme.com';S.user={id:'demo',name:'Demo Analyst',email:em,org:'Acme Brand Co.',role:'admin'};S.view='library';render();notify('Welcome back, Demo Analyst',C.cyan)}
+function demoLogin(){S.user={id:'demo',name:'Demo Analyst',email:'analyst@acme.com',org:'Acme Brand Co.',role:'admin'};S.view='library';render();notify('Loaded 6 demo experiments',C.cyan)}
+function doLogout(){S.user=null;S.view='login';render()}
+function goLib(){S.view='library';render()}
+
+function openExp(id,target){
+  const exp=S.experiments.find(ex=>ex.id===id);if(!exp)return;
+  S.activeExp=JSON.parse(JSON.stringify(exp));S.wizStep=exp.wizardStep||0;
+  S.view=target||(exp.status==='complete'?'results':exp.status==='active'?'monitor':'wizard');render();
+}
+
+function openNew(){
+  const exp={id:'exp-'+Date.now(),name:'',status:'draft',type:'single',kpi:'Revenue',channel:'Meta',geoLevel:'DMA',granularity:'daily',testRange:'',startDate:'',endDate:'',preStart:'',preEnd:'',spend:'',targetEffect:'5',confidence:'80',wizardStep:0,datasetId:null,selectionId:null,powerId:null,resultId:null,cells:[{id:'t1',label:'Treatment',color:C.cyan}],missingValues:false,structuralBreaks:false,hasMinGeos:false,covariates:false,bpScore:0};
+  S.activeExp=exp;S.experiments.unshift(exp);S.wizStep=0;S.view='wizard';render();
+}
+
+function setFilter(f){S.filter=f;render()}
+function setSearch(v){S.search=v;render()}
+function setWizStep(s){S.wizStep=s;if(S.activeExp)S.activeExp.wizardStep=s;render()}
+function updExp(k,v){if(!S.activeExp)return;S.activeExp[k]=v;const i=S.experiments.findIndex(ex=>ex.id===S.activeExp.id);if(i!==-1)S.experiments[i][k]=v}
+function updExpRender(k,v){updExp(k,v);render()}
+function toggleCheck(k,inv){if(!S.activeExp)return;S.activeExp[k]=!S.activeExp[k];const i=S.experiments.findIndex(ex=>ex.id===S.activeExp.id);if(i!==-1)S.experiments[i][k]=S.activeExp[k];render()}
+
+function simUpload(){const id='ds-'+Date.now();notify('Uploading & validating…',C.cyan);setTimeout(()=>{updExp('datasetId',id);updExp('bpScore',Math.min(14,(S.activeExp?.bpScore||0)+4));render();notify('Dataset ready · '+id,C.green)},1500)}
+function simMarkets(){const id='sel-'+Date.now();notify('Running GeoLiftMarketSelection()…',C.amber);setTimeout(()=>{updExp('selectionId',id);render();notify('Market selection complete · R²=0.974 · '+id,C.amber)},2000)}
+function simPower(){const id='pow-'+Date.now();notify('Submitting GeoLiftPower() job…',C.purple);setTimeout(()=>{updExp('powerId',id);render();notify('Power analysis complete · MDE 5.2% · '+id,C.purple)},2500)}
+
+function launchExp(){
+  if(!S.activeExp?.datasetId||!S.activeExp?.selectionId||!S.activeExp?.powerId){notify('Complete all steps before launching',C.red);return;}
+  updExp('status','active');updExp('daysElapsed',0);updExp('testDays',21);
+  const i=S.experiments.findIndex(ex=>ex.id===S.activeExp?.id);if(i!==-1)S.experiments[i]=JSON.parse(JSON.stringify(S.activeExp));
+  S.view='library';render();notify('Experiment launched — flight monitoring active',C.green);
+}
+
+function notify(msg,color=C.cyan){const id=Date.now();S.toasts.push({id,msg,color});const el=document.getElementById('toasts');if(el)el.innerHTML=toastsInner();else render();setTimeout(()=>{S.toasts=S.toasts.filter(t=>t.id!==id);const el=document.getElementById('toasts');if(el)el.innerHTML=toastsInner()},3500)}
+function dismissToast(id){S.toasts=S.toasts.filter(t=>t.id!==id);const el=document.getElementById('toasts');if(el)el.innerHTML=toastsInner()}
+
+render();
+</script></body></html>
