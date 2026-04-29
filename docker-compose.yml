@@ -1,0 +1,149 @@
+version: "3.9"
+
+services:
+
+  # ── R/Plumber API ───────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    ports:
+      - "8000:8000"
+    environment:
+      - GEOLIFT_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=geolift
+      - DB_USER=geolift
+      - DB_PASSWORD=${DB_PASSWORD:-geolift_dev}
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-geolift-data}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minio_dev}
+      - JWT_SECRET=${JWT_SECRET:-dev_secret_change_in_production}
+      - LOG_LEVEL=INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      # Mount R code for hot-reload in development
+      - ./R:/app/R:ro
+      - ./api.R:/app/api.R:ro
+    restart: unless-stopped
+    networks:
+      - geolift
+
+  # ── Worker: async job queue (long-running R computations) ───────
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+    command: ["Rscript", "R/worker.R"]
+    environment:
+      - GEOLIFT_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=geolift
+      - DB_USER=geolift
+      - DB_PASSWORD=${DB_PASSWORD:-geolift_dev}
+      - REDIS_URL=redis://redis:6379
+      - S3_BUCKET=${S3_BUCKET:-geolift-data}
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://minio:9000}
+      - AWS_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minio}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minio_dev}
+      - WORKER_CONCURRENCY=2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./R:/app/R:ro
+    restart: unless-stopped
+    networks:
+      - geolift
+
+  # ── PostgreSQL ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=geolift
+      - POSTGRES_USER=geolift
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-geolift_dev}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./sql/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U geolift -d geolift"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"   # expose for local dev tooling; remove in production
+    networks:
+      - geolift
+
+  # ── Redis (job queue + caching) ─────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "6379:6379"   # expose for local dev; remove in production
+    networks:
+      - geolift
+
+  # ── MinIO (S3-compatible object storage for datasets) ───────────
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minio}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minio_dev}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # MinIO console UI
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - geolift
+
+  # ── React frontend (dev server) ─────────────────────────────────
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host"
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    networks:
+      - geolift
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  geolift:
+    driver: bridge
